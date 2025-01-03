@@ -1,0 +1,184 @@
+with all_observers as (
+select *,
+extract(date from PARSE_DATETIME('%m/%d/%Y %H:%M:%S', timestamp)) as parsed_datetime,
+from `demscoord24.local_turkg.poll_observer_commitment_responses_v2`
+)
+select * from all_observers 
+where parsed_datetime = date_sub(current_date('America/New_York'), interval 1 day)
+
+import requests
+
+output = get_poll_observers.output
+key = get_credentials.output.API_KEY
+app_name = get_credentials.output.APPLICATION_NAME
+van_auth = (app_name, key + "|1")
+resp_list = []
+list_to_compare = []
+
+url = "https://api.securevan.com/v4/people/find"
+
+for observer in output:
+    print(observer)
+    payload = {
+        "firstName": observer['first_name'], 
+        "lastName": observer['last_name'],
+        "emails": [{'email': observer['email']}], 
+        "Phones": [
+            {
+                "phoneNumber": observer['phone_number'], 
+                "dialingPrefix": "1", 
+                "countryCode": "US"
+            }
+        ]
+    }
+
+    headers = {
+        "accept": "application/json", 
+        "content-type": "application/json"
+    }
+    
+    resp = requests.post(url, json=payload, headers=headers, auth=van_auth)
+    try: 
+        data = resp.json()
+        print(data)
+        dictionary = {
+            'vanid': data['vanId'],
+            'first_name': observer['first_name'], 
+            'last_name': observer['last_name'],
+            'email': observer['email'],
+            'phone_number': observer['phone_number'],
+            'street_address': observer['street_address'],
+            "zip": observer['zip'],
+            'city': observer['city']
+            
+        }
+        if data['vanId']:
+            list_to_compare.append(dictionary)
+    except: 
+        print('cant find van user')
+
+return(list_to_compare)
+
+import requests
+
+credentials = get_credentials.output 
+api_key = credentials['API_KEY']
+app_name = credentials['APPLICATION_NAME']
+van_auth = (app_name, api_key + "|1")
+fail_list = []
+output = find_request.output
+
+payload_list = []
+list_of_resps = []
+
+url = "https://api.securevan.com/v4/people/"
+
+for d in output: 
+    payload = {
+        "vanId": d["vanid"],
+        "firstName": d['first_name'], 
+        "lastName": d['last_name']
+    }
+    
+    if d.get('email') and d['email'] != '': 
+        payload["emails"] = [
+            {
+                "email": d['email'],
+                "isPreferred": "true"
+            }
+        ]
+        
+    if d.get('phone_number') and d['phone_number'] != '':
+        payload["Phones"] = [
+            {
+                "phoneNumber": d['phone_number'],
+                "dialing_prefix": "1",
+                "countryCode": "US",
+                "isPreferred": "true"
+            }
+        ]
+        
+    if d.get('address') and d['address'] != '': 
+        payload['addresses'] = [
+            {
+                "addressLine1": d['street_address'],
+                "city": d['city'],
+                "stateOrProvince": "PA",
+                "zipOrPostalCode": d['zip']
+            }
+        ]
+    print(payload)    
+    payload_list.append(payload)
+        
+
+for p in payload_list: 
+    
+    print(url + str(p['vanId']))
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json"
+    }
+    response = requests.post(url + str(p['vanId']), json=p, headers=headers, auth=van_auth)
+    try: 
+        temp_vanid = response.json()['vanId']
+        list_of_resps.append(response.json())
+    except:
+        fail_list.append({
+            'vanid': p['vanId'],
+            'first_name': p['firstName'],
+            'last_name': p['lastName'],
+            'email': p['emails'][0]['email'],
+            'phone_number': p['Phones'][0]['phoneNumber']
+        })   
+    
+
+return fail_list
+
+import requests
+import json
+
+output = find_request.output
+api_key = get_credentials.output["API_KEY"]
+app_name = get_credentials.output["APPLICATION_NAME"]
+van_auth = (app_name, api_key + "|1")
+list_of_responses = []
+list_of_fails = []
+
+print(output)
+
+
+for d in output:
+    payload = {
+        "vanId": d["vanid"],
+        "responses": [
+            {
+                "type": "SurveyResponse",
+                "action": "Apply",
+                "surveyQuestionId": 623400,
+                "surveyResponseId": 2524828,
+            },
+            {
+                "type": "SurveyResponse",
+                "action": "Apply",
+                "surveyQuestionId": 627655,
+                "surveyResponseId": 2542847,
+            },
+            {"type": "ActivistCode", "action": "Apply", "activistCodeId": 5392179},
+        ],
+    }
+
+    headers = {"accept": "text/plain", "content-type": "application/json"}
+
+    url = f"https://api.securevan.com/v4/people/{payload['vanId']}/canvassResponses"
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, auth=van_auth)
+        if response.status_code == 204:
+            print("Working!")
+        else:
+            list_of_fails.append(d)
+    except requests.exceptions.HTTPError as http_err:
+        list_of_fails.append(d)
+
+
+return list_of_fails
