@@ -1,0 +1,475 @@
+### get_errors ###
+with foc_input as (
+    select * from `demscoord24.pa.oos_hub_foc_input`
+)
+
+, foc_output as (
+		select * from `demscoord24.pa.oos_hub_foc_output`
+)
+
+, combined_foc as (
+    select
+        foc_input.timestamp
+				, foc_input.firstName
+        , foc_input.lastName
+        , foc_input.email
+				, foc_input.phone
+				, foc_input.stateOrProvince
+				, foc_input.zipOrPostal
+				, foc_input.vol_type
+				, foc_input.group_size
+        , foc_input.matchbackId
+        , cast(foc_output.PrimaryKey as string) as myc_van_id
+        , foc_output.CreateOrUpdateContactsStatus as job_status
+    from foc_input
+    left join foc_output
+        on foc_input.matchbackId = foc_output.matchbackId
+)
+
+, foc_errors as (
+    select
+			firstName
+			, lastName
+			, email
+			, phone
+			, stateOrProvince
+			, zipOrPostal
+			, vol_type
+			, group_size
+		from combined_foc
+    where myc_van_id is null or job_status != "Processed"
+)
+
+select * from foc_errors
+
+### get_oos_vols ###
+with all_names as (
+  select 
+    cast(ooso.PrimaryKey as string) as VANID, 
+    oosi.additional_comments as note, 
+		
+  from `demscoord24.pa.oos_hub_foc_input` as oosi 
+  join `demscoord24.pa.oos_hub_foc_output` as ooso 
+  on oosi.matchbackId = ooso.matchbackid
+) 
+select * from all_names
+where VANID is not null
+
+### oos_vols_dictionary ###
+oos_dict_list = []
+oos_dict = {}
+
+for output in get_oos_vols.output:
+    print(output)
+    oos_dict = {"VANID": output["VANID"], "note": output["note"]}
+    oos_dict_list.append(oos_dict)
+
+return oos_dict_list
+
+### van_request ###
+import requests
+import json
+
+credentials = get_api_key.output
+oos_vols = oos_vols_dictionary.output
+url = "https://api.securevan.com/v4/people/"
+endpoint = "/notes"
+
+api_key = credentials["API_KEY"]
+app_name = credentials["APPLICATION_NAME"]
+van_auth = (app_name, api_key + "|1")
+
+for vol in oos_vols:
+    vanid = str(vol.VANID)
+    note = vol.note
+
+    payload = {
+        "text": note,
+        "isViewRestricted": False,
+    }
+
+    headers = {"accept": "application/json", "content-type": "application/json"}
+
+    print(url + vanid + endpoint)
+    resp = requests.post(
+        url + vanid + endpoint, json=payload, headers=headers, auth=van_auth
+    )
+
+### get_activist_codes ###
+create or replace table `demscoord24.local_nasonc.oos_vol_activist_codes` as (
+with initial_binary as (
+  select oosi.*,
+  cast(ooso.PrimaryKey as string) as VANID,
+case
+  	when lower(oosi.group_size) like "%50%" then 1 else 0
+end as group_size_answer_code,
+
+case
+  when oosi.has_car = 'Yes' then 1 else 0
+end as has_car_answer_code,
+
+case 
+  when oosi.campaign_alum = 'Yes' then 1 else 0
+end as campaign_alum_code,
+
+case
+  when oosi.when_in_pa like '%September 7-8%' or oosi.when_in_pa like '%Early September%' then 1 
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  else 0
+end as sept_7_8_code, 
+
+case
+  when oosi.when_in_pa like '%September 14-15%' or oosi.when_in_pa like '%Early September%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  else 0
+end as sept_14_15_code, 
+
+case
+  when oosi.when_in_pa like '%September 21-22%' or oosi.when_in_pa like '%Late September%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  else 0
+end as sept_21_22_code, 
+
+case
+  when oosi.when_in_pa like '%September 28-29%' or oosi.when_in_pa like '%Late September%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  else 0
+end as sept_28_29_code, 
+
+case
+  when oosi.when_in_pa like '%October 5-6%' or oosi.when_in_pa like '%Early October%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%october%" then 1
+  else 0
+end as oct_5_6_code, 
+
+case
+  when oosi.when_in_pa like '%October 12-13%' or oosi.when_in_pa like '%Early October%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%october%" then 1
+  else 0
+end as oct_12_13_code, 
+
+case
+  when oosi.when_in_pa like '%October 19-20%' or oosi.when_in_pa like '%Late October%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%october%" then 1
+  else 0
+end as oct_19_20_code, 
+
+case
+  when oosi.when_in_pa like '%October 26-27%' or oosi.when_in_pa like '%Late October%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%october%" then 1
+  else 0
+end as oct_26_27_code, 
+
+case
+  when oosi.when_in_pa like '%November 2-5%' or lower(oosi.when_in_pa) like '%november%' or lower(oosi.when_in_pa) like '%gotv%' then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%september%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%october%" then 1
+  when lower(oosi.source_form) like "%late%" and oosi.when_in_pa like "%november%" then 1
+  else 0
+end as gotv_vol_code, 
+
+case
+  when lower(oosi.when_in_pa) like '%periodically%' then 1 else 0
+end as periodically_code, 
+
+case 
+  when lower(oosi.region_preference) like '%philadelphia' and lower(oosi.region_preference) not like '%suburbs%' then 1 else 0
+end as philadelphia_region_code, 
+
+case 
+  when lower(oosi.region_preference) like '%philadelphia suburbs%' then 1 else 0
+end as philadelphia_suburbs_code, 
+
+case 
+  when lower(oosi.region_preference) like '%northeast%' or lower(oosi.region_preference) like '%scranton' or lower(oosi.region_preference) like '%wilkes-barre' or lower(oosi.region_preference) like '%hazleton' then 1 else 0
+end as northeast_pa_code, 
+
+case 
+  when lower(oosi.region_preference) like '%lehigh valley%' or lower(oosi.region_preference) like '%allentown' or lower(oosi.region_preference) like '%easton' then 1 else 0
+end as lehigh_valley_region_code, 
+
+case 
+  when lower(oosi.region_preference) like '%south central%' or lower(oosi.region_preference) like '%lancaster' or lower(oosi.region_preference) like '%dauphin county' or lower(oosi.region_preference) like '%harrisburg' or lower(oosi.region_preference) like '%york' then 1 else 0
+end as south_central_region_code, 
+
+case 
+  when lower(oosi.region_preference) like '%allegheny%' or lower(oosi.region_preference) like '%pittsburgh%' then 1 else 0
+end as allegheny_region_code, 
+
+case 
+  when lower(oosi.region_preference) like '%erie%' then 1 else 0
+end as erie_region_code, 
+
+case 
+  when cast(ooso.primaryKey as string) is not null then 1 else 0
+end as oos_vol_code, 
+	
+case 
+	when lower(oosi.action_type) like '%knocking doors%' or lower(oosi.action_type) like '%canvass%' then 1 else 0
+end as oos_canvass_code, 
+
+case 
+	when lower(oosi.action_type) like '%phone%' or lower(oosi.action_type) like '%virtual%' then 1 else 0
+end as oos_phonebank_code, 
+
+case
+  when lower(oosi.source_form) like "%late%" then 1 else 0
+end as oos_late_help,
+
+case 
+  when lower(oosi.needs_housing) = 'yes' then 1 else 0
+end as oos_housing_code
+
+
+from `demscoord24.pa.oos_hub_foc_input` oosi 
+join `demscoord24.pa.oos_hub_foc_output` as ooso
+on oosi.matchbackId = ooso.matchbackid
+where ooso.PrimaryKey is not null
+order by oosi.matchbackId
+)
+
+, has_car as (
+  select 
+    VANID, 
+    '5387322' as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.has_car_answer_code = 1
+), erie_vol as (
+  select 
+    VANID, 
+    '5387331' as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary 
+    where initial_binary.erie_region_code = 1
+), allegheny_vol as (
+  select
+    VANID, 
+    '5387330' as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.allegheny_region_code = 1
+), south_central_vol as (
+  select 
+    VANID, 
+    '5387329' as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary 
+    where initial_binary.south_central_region_code = 1
+), ne_vol as (
+  select
+    VANID, 
+    '5387326' as activistCodeId, 
+    "8" as contactTypeId, 
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.northeast_pa_code = 1
+), lehigh_vol as (
+  select 
+    VANID, 
+    "5387327" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.lehigh_valley_region_code = 1
+), philly_subs_vol as (
+    select 
+    VANID, 
+    "5387325" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.philadelphia_suburbs_code = 1
+), philly_vol as (
+      select 
+    VANID, 
+    "5387324" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.philadelphia_region_code = 1
+), campaign_alum_vol as (
+  select 
+    VANID, 
+    "5387323" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.campaign_alum_code = 1
+), gotv_vol as (
+  select 
+    VANID, 
+    "5387321" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.gotv_vol_code = 1
+), oct_26_weekend_vol as (
+  select 
+    VANID, 
+    "5387320" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oct_26_27_code = 1
+), oct_19_weekend_vol as (
+  select 
+    VANID, 
+    "5387319" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oct_19_20_code = 1
+), oct_12_weekend_vol as (
+  select 
+    VANID, 
+    "5387317" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oct_12_13_code = 1
+), oct_5_weekend_vol as (
+  select 
+    VANID, 
+    "5387316" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oct_5_6_code = 1
+), sept_21_weekend_vol as (
+  select 
+    VANID, 
+    "5387314" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.sept_21_22_code = 1
+), sept_28_weekend_vol as (
+  select 
+    VANID, 
+    "5387315" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.sept_28_29_code = 1
+), sept_14_weekend_code as (
+  select 
+    VANID, 
+    "5387313" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.sept_28_29_code = 1
+), sept_7_weekend_vol as (
+  select 
+    VANID, 
+    "5387312" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.sept_7_8_code = 1
+), oos_group_lead as (
+  select 
+    VANID, 
+    "5387311" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.group_size_answer_code = 1
+), oos_vol as (
+  select 
+    VANID, 
+    "5387310" as activistCodeId, 
+    "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oos_vol_code = 1
+), oos_canvass as (
+	select 
+		VANID, 
+    "5342660" as activistCodeId, 
+	  "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+	from initial_binary
+		where initial_binary.oos_canvass_code = 1
+), oos_phonebank as (
+	select 
+		VANID, 
+    "5342656" as activistCodeId, 
+	  "8" as contactTypeId,
+    current_date("America/New_York") as dateCanvassed
+	from initial_binary
+		where initial_binary.oos_phonebank_code = 1
+), needs_housing as (
+  select
+    VANID, 
+    "5387676" as activistCodeId, 
+    "8" as contactTypeId, 
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary 
+    where initial_binary.oos_housing_code = 1
+), late_help as (
+  select 
+    VANID, 
+    "5388387" as activistCodeId, 
+    "8" as contactTypeId, 
+    current_date("America/New_York") as dateCanvassed
+  from initial_binary
+    where initial_binary.oos_late_help = 1
+)
+select * from has_car
+union all 
+select * from erie_vol
+union all
+select * from allegheny_vol
+union all 
+select * from south_central_vol
+union all 
+select * from ne_vol
+union all
+select * from lehigh_vol
+union all
+select * from philly_subs_vol
+union all
+select * from philly_vol
+union all
+select * from campaign_alum_vol
+union all
+select * from gotv_vol
+union all
+select * from oct_26_weekend_vol
+union all
+select * from oct_19_weekend_vol
+union all
+select * from oct_12_weekend_vol
+union all
+select * from oct_5_weekend_vol
+union all
+select * from sept_21_weekend_vol
+union all
+select * from sept_28_weekend_vol
+union all
+select * from sept_14_weekend_code
+union all
+select * from sept_7_weekend_vol
+union all
+select * from oos_group_lead
+union all
+select * from oos_vol
+union all 
+select * from oos_canvass
+union all 
+select * from oos_phonebank
+union all 
+select * from needs_housing
+union all
+select * from late_help
+)
