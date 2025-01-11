@@ -1,0 +1,168 @@
+import requests
+import json
+import pygsheets
+import pytz
+import pandas as pd
+import sys
+import copy
+import datetime
+
+secrets = {
+    "APPLICATION_NAME": "",
+    "API_KEY": ""
+}
+
+columns_to_keep = ['Folder Name', 'Precinct Name', 'List Name', 'Cut By']
+
+cutoff_date = datetime(2024, 10, 18, tzinfo=pytz.timezone('US/Eastern'))
+
+all_folders = []
+
+api_key = secrets['API_KEY']
+app_name = secrets['APPLICATION_NAME']
+
+van_auth = (app_name, api_key + "|0")
+
+resp_list = []
+
+url = "https://api.securevan.com/v4/folders"
+headers = {"accept": "application/json"}
+
+id_response = requests.get(url, headers=headers, auth=van_auth)
+data = id_response.json()
+resp_list.append(data)
+
+link = 'https://docs.google.com/spreadsheets/d/1kjRizLRLOz6FcRLegFyiT-S7kv1gcsdNoqp6uvB21wM/edit?gid=350439972#gid=350439972'
+gc = pygsheets.authorize(service_file="/Users/gturk/Developer/google-service-accounts/pa-data-gt-10-729e55f2cb1a.json")
+sh = gc.open_by_url(link)
+
+# get all region ids and names
+for d in data['items']:
+    folder_id = d['folderId']
+    folder_name = d['name']
+    folder_dict = {
+        'name': folder_name,
+        'id': folder_id
+    }
+    all_folders.append(folder_dict)
+
+# get all the spreadsheet info
+turfs_to_folder = {}
+precincts_to_folder = {}
+
+all_tabs = [worksheet.title for worksheet in sh.worksheets()]
+for tab in all_tabs:
+    if tab.startswith('R'):
+        wksht = sh.worksheet('title', tab)
+        values = wksht.get_all_values()
+        if tab != 'R05':
+            df = pd.DataFrame(values[2:], columns=values[1])
+            df_subset = df[columns_to_keep]
+            df_list_subset = df_subset.to_dict(orient='records')
+            for row in df_list_subset:
+                if row['Folder Name'] != '':
+                    turfs_to_folder[row['List Name']] = {
+                        'folder': row['Folder Name'],
+                        'cut by': row['Cut By'],
+                        'precinct': row['Precinct Name']
+                    }
+                    precincts_to_folder[row['Precinct Name']] = {
+                        'folder': row['Folder Name'],
+                        'cut by': row['Cut By'],
+                        'list': row['List Name']
+                    }
+        else:
+            df = pd.DataFrame(values[1:], columns=values[0])
+            df_subset = df[columns_to_keep]
+            df_list_subset = df_subset.to_dict(orient='records')
+            for row in df_list_subset:
+                if row['Folder Name'] != '':
+                    turfs_to_folder[row['List Name']] = {
+                        'folder': row['Folder Name'],
+                        'cut by': row['Cut By'],
+                        'precinct': row['Precinct Name']
+                    }
+                    precincts_to_folder[row['Precinct Name']] = {
+                        'folder': row['Folder Name'],
+                        'cut by': row['Cut By'],
+                        'list': row['List Name']
+                    }
+            
+                    # all_rows.append(row)
+
+turfs_copy = copy.deepcopy(turfs_to_folder)
+
+# loop through spreadsheet info, check to see which list name is in the incorrect folder by comparing it to what is returned in mapRegions api
+wrong_folder = []
+wrong_name = []
+wrong_name_and_folder = []
+
+for index, folder_info in enumerate(all_folders, start=1):
+    # print(f"Checking folder {index}")
+    folder_id = folder_info['id']
+    folder_name = folder_info['name']
+    url2 = f"https://api.securevan.com/v4/folders/{folder_id}/mapRegions"
+    data2 = requests.get(url2, headers=headers, auth=van_auth)
+
+    try:
+        data2_json = data2.json()
+    except Exception as e:
+        print(f"Error with the request: {e}")
+        continue
+
+    if 'items' in data2_json:
+        for item in data2_json['items']:
+            turf = item['name']
+            if turf in turfs_to_folder.keys():
+                if folder_name == turfs_to_folder[turf]['folder']:
+                    if turf in turfs_copy:
+                        del turfs_copy[turf]
+                else:
+                    incorrect_dict = {
+                        'turf name': turf,
+                        'incorrect folder': folder_name,
+                        'correct folder': turfs_to_folder[turf]['folder'],
+                        'cut by': turfs_to_folder[turf]['cut by']
+                    }
+                    wrong_folder.append(incorrect_dict)
+                    if turf in turfs_copy:
+                        del turfs_copy[turf]
+
+            elif turf in precincts_to_folder.keys():
+                correct_turf = precincts_to_folder[turf]['list']
+
+                if folder_name == turfs_to_folder[correct_turf]['folder']:
+                    incorrect_dict = {
+                        'turf name': turf,
+                        'correct name': correct_turf,
+                        'folder': folder_name,
+                        'cut by': turfs_to_folder[correct_turf]['cut by']
+                    }
+                    wrong_name.append(incorrect_dict)
+                    if correct_turf in turfs_copy:
+                        del turfs_copy[correct_turf]
+                else:
+                    incorrect_dict = {
+                        'turf name': turf,
+                        'correct name': correct_turf,
+                        'incorrect folder': folder_name,
+                        'correct folder': turfs_to_folder[correct_turf]['folder'],
+                        'cut by': turfs_to_folder[correct_turf]['cut by']
+                    }
+                    wrong_name_and_folder.append(incorrect_dict)
+                    if correct_turf in turfs_copy:
+                        del turfs_copy[correct_turf]
+
+df_for_csv = pd.DataFrame(wrong_folder)
+df_for_csv.to_csv('./wrong_folder.csv', index=False)
+
+df_for_csv = pd.DataFrame(wrong_name)
+df_for_csv.to_csv('./wrong_name.csv', index=False)
+
+df_for_csv = pd.DataFrame(wrong_name_and_folder)
+df_for_csv.to_csv('./wrong_name_and_folder.csv', index=False)
+
+# Write remaining turfs to another CSV
+remaining_turfs = [{'turf name': turf, **details} for turf, details in turfs_copy.items()]
+df_remaining = pd.DataFrame(remaining_turfs)
+df_remaining.to_csv('./missing_turfs.csv', index=False)
