@@ -32,8 +32,8 @@ id_response = requests.get(url, headers=headers, auth=van_auth)
 data = id_response.json()
 resp_list.append(data)
 
-link = 'https://docs.google.com/spreadsheets/d/1kjRizLRLOz6FcRLegFyiT-S7kv1gcsdNoqp6uvB21wM/edit?gid=350439972#gid=350439972'
-gc = pygsheets.authorize(service_file="/Users/gturk/Developer/google-service-accounts/pa-data-gt-10-729e55f2cb1a.json")
+link = 
+gc = 
 sh = gc.open_by_url(link)
 
 # get all region ids and names
